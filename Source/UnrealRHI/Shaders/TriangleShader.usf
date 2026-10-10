@@ -1,0 +1,15 @@
+#include "/Engine/Public/Platform.ush"
+
+
+void MainVS(in float3 InPosition : ATTRIBUTE0, in float3 InColor : ATTRIBUTE1, out float4 OutPosition : SV_POSITION, out float3 OutColor : COLOR0)
+{
+    OutPosition = float4(InPosition, 1.0f);
+    OutColor = InColor;
+}
+
+// Ok - czyli po prostu pixel shader musi przyj¹æ wszystko to co zwraca vertex shader - jeœli z VS zwracamy OutPosition i OutColor, to PS musi przyj¹æ oba te parametry.
+
+float4 MainPS(in float4 InPosition : SV_POSITION, in float3 InColor : COLOR0) : SV_Target0
+{
+    return float4(InColor, 1.0f);
+}
