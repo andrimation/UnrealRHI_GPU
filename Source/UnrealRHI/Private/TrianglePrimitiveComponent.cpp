@@ -5,9 +5,11 @@
 #include "TriangleUtilities.h"
 #include "DynamicMeshBuilder.h"
 
-FTrianglePrimitiveSceneProxy::FTrianglePrimitiveSceneProxy(const UTrianglePrimitiveComponent* InComponent, UMaterialInterface* InMaterial)
+FTrianglePrimitiveSceneProxy::FTrianglePrimitiveSceneProxy(const UTrianglePrimitiveComponent* InComponent, UMaterialInterface* InMaterial, TArray<FDynamicMeshVertex>& InVertices, TArray<int32>& InIndices)
 	: FPrimitiveSceneProxy(InComponent)  // Tu tworzymy obiekt klasy bazowej, czyli to samo co Super() -> z tym ¿e nie jest to UCLASS wiêc nie mamy super
 	, MaterialRenderProxy(InMaterial->GetRenderProxy())
+    , Vertices(InVertices)
+	, Indices(InIndices)
 	, MaterialRelevance(InMaterial->GetRelevance_Concurrent(GetScene().GetFeatureLevel()))
 	, VertexFactory(GetScene().GetFeatureLevel(), "FTrianglePrimitiveSceneProxy")
 {
@@ -19,7 +21,7 @@ FTrianglePrimitiveSceneProxy::FTrianglePrimitiveSceneProxy(const UTrianglePrimit
 		GetVerticesAndIndicesFromStaticMesh(InComponent->StaticMeshToRender);
     }
 	// Jeœli nie podano StaticMesh, to generujemy po prostu kwadrat.
-    else
+	if (Vertices.Num() == 0 || Indices.Num() == 0)
     {
         Vertices =
         {
@@ -245,7 +247,7 @@ void FTrianglePrimitiveSceneProxy::GetDynamicMeshElements(const TArray<const FSc
         FMeshBatchElement& BatchElement = Mesh.Elements[0];
 		BatchElement.IndexBuffer = &IndexBuffer;        // Index buffer - czyli bufor indeksów ( w naszym przypadku 0,1,2 )
 		BatchElement.FirstIndex = 0;                    // Pierwszy indeks W INDEX BUFFERZE do renderowania ( w naszym przypadku 0 ) 
-		BatchElement.NumPrimitives = 2;                 // Liczba prymitywów do renderowania ( w naszym przypadku 1 trójk¹t )
+		BatchElement.NumPrimitives = Indices.Num() / 3;                 // Liczba prymitywów do renderowania ( w naszym przypadku 1 trójk¹t )
 		BatchElement.MinVertexIndex = 0;                // Minimalny indeks wierzcho³ka ( w naszym przypadku 0 )
 		BatchElement.MaxVertexIndex = Vertices.Num() - 1; // Maksymalny indeks wierzcho³ka ( w naszym przypadku 2 )
 		BatchElement.NumInstances = 1;                  // Liczba instancji do renderowania ( w naszym przypadku 1 )
@@ -299,22 +301,40 @@ UTrianglePrimitiveComponent::UTrianglePrimitiveComponent()
 FPrimitiveSceneProxy* UTrianglePrimitiveComponent::CreateSceneProxy()
 {
     UMaterialInterface* MaterialToUse = Material ? Material : UMaterial::GetDefaultMaterial(MD_Surface);
-    return new FTrianglePrimitiveSceneProxy(this, MaterialToUse);
+    return new FTrianglePrimitiveSceneProxy(this, MaterialToUse,Vertices,Indices);
 }
 
 FBoxSphereBounds UTrianglePrimitiveComponent::CalcBounds(const FTransform& LocalToWorld) const
 {
-    const FBox LocalBox(
-        FVector(-10.0f, -10.0f, -10.0f), 
-        FVector(210.0f, 10.0f, 210.0f)
-    );
+    FBox LocalBox(ForceInit);
 
-	return FBoxSphereBounds(LocalBox).TransformBy(LocalToWorld);
+    for (const FDynamicMeshVertex& Vertex : Vertices)
+    {
+        LocalBox += FVector(Vertex.Position);
+    }
+
+    if (!LocalBox.IsValid)
+    {
+        LocalBox = FBox(
+            FVector(-1.0),
+            FVector(1.0)
+        );
+    }
+
+    return FBoxSphereBounds(
+        LocalBox.ExpandBy(1.0)
+    ).TransformBy(LocalToWorld);
 }
 
 void UTrianglePrimitiveComponent::GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials, bool bGetDebugMaterials) const
 {
 	UMaterialInterface* MaterialToUse = Material ? Material : UMaterial::GetDefaultMaterial(MD_Surface);
 	OutMaterials.Add(MaterialToUse);
+}
+
+void UTrianglePrimitiveComponent::SetVerticesAndIndices(TArray<FDynamicMeshVertex>&& InVertices, TArray<int32>&& InIndices)
+{
+	Vertices = MoveTemp(InVertices);
+	Indices =  MoveTemp(InIndices);
 }
 

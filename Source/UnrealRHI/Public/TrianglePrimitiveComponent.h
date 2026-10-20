@@ -12,7 +12,7 @@ class FTrianglePrimitiveSceneProxy : public FPrimitiveSceneProxy
 {
 public:
 
-	FTrianglePrimitiveSceneProxy(const UTrianglePrimitiveComponent* InComponent, UMaterialInterface* InMaterial);
+	FTrianglePrimitiveSceneProxy(const UTrianglePrimitiveComponent* InComponent, UMaterialInterface* InMaterial,TArray<FDynamicMeshVertex>& InVertices, TArray<int32>& InIndices);
 	
 	virtual void CreateRenderThreadResources(FRHICommandListBase& RHICmdList) override;
 	virtual void DestroyRenderThreadResources() override;
@@ -105,5 +105,12 @@ public:
 	// GetUsedMaterials - zwraca wszystkie materia³y u¿ywane przez dany komponent ( w naszym przypadku tylko jeden )
 	// - generalnie nie s³u¿y bezpoœrednio do renderowania, ale zg³aszania u¿ywanych materia³ów do systemu silnika
 	virtual void GetUsedMaterials(TArray<UMaterialInterface*>& OutMaterials, bool bGetDebugMaterials) const override;
+
+	void SetVerticesAndIndices(TArray<FDynamicMeshVertex>&& InVertices, TArray<int32>&& InIndices);
+
+private:
+
+	TArray<FDynamicMeshVertex> Vertices;
+	TArray<int32> Indices;
 
 };

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "TrianglePrimitiveComponent.h"
+
 #include "RHIActorScene.generated.h"
 
 
@@ -33,5 +34,8 @@ protected:
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+private:
+	//FOSMDataLoader OSMDataLoader;
 
 };

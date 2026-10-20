@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
+
 // Sets default values
 ARHIActorScene::ARHIActorScene()
 {
