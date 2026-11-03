@@ -1,0 +1,193 @@
+#include "/Engine/Public/Platform.ush"
+
+// Wartoœci zmiennych powy¿ej s¹ ustawiane w kodzie C++ i przekazywane do shaderów. Start/End pos i height s¹ ustawiane w C++, 
+// natomiast OutPositions jest buforem do któego shader bezpoœrednio zapisuje wyniki. 
+// Zadeklarowane tu zmienne s¹ globalne w ramach shaderu i dostêpne w ka¿dej funkcji shadera.
+// Zmienne zadeklarowane w funkcji s¹ natomiast lokalne i dostêpne tylko w tej funkcji.]
+
+struct BuildingData
+{
+    uint PointOffset;
+    uint PointCount;
+    
+    float Height;
+};
+
+StructuredBuffer<float3> InFootprints;
+StructuredBuffer<BuildingData> InBuildings;
+
+uint BuildingsCount;
+
+float4 StartPosition;
+float4 EndPosition;
+float WallHeight;
+
+// RW czyli Read/Write buffer
+RWBuffer<float> OutPositions; // OuPositions - to bufor bezpoœrednio na GPU do którego shader bêdzie zapisywaæ
+RWBuffer<uint> OutTangents;
+RWBuffer<float2> OutTextureCoords;
+RWBuffer<uint> OutIndices;
+
+void WriteOutPosition(uint InIndex, float3 InVector)
+{
+    // Funkcja pomocnicza do zapisu wierzcho³ka.
+    uint Index = InIndex * 3;
+    
+    OutPositions[Index + 0] = InVector.x;
+    OutPositions[Index + 1] = InVector.y;
+    OutPositions[Index + 2] = InVector.z;
+    
+}
+
+uint PackFPackedNormal(float3 N, float W)
+{
+    float4 V = clamp(float4(N, W), -1.0f, 1.0f);
+
+    int4 Quantized = (int4) round(V * 127.0f);
+    uint4 Bytes = (uint4) Quantized & 0xFFu;
+
+    return Bytes.x
+         | (Bytes.y << 8)
+         | (Bytes.z << 16)
+         | (Bytes.w << 24);
+}
+
+// MainCS - nie jest zwyk³¹ funkcj¹ C++ tylko entry pointem shaderu -> gpu wykonuje j¹ w momencie dispatchu shadera.
+[numthreads(1, 1, 1)]
+void MainCS(uint3 ThreadId : SV_DispatchThreadID)  //ThreadId to paramert przekazywany przez system wykonuj¹cy shader
+{
+    float3 firstPoint = StartPosition.xyz;
+    float3 secondPoint = EndPosition.xyz;
+    
+    float3 heightUp = float3(0.0f, 0.0f, WallHeight);
+    
+    WriteOutPosition(0, firstPoint);
+    WriteOutPosition(1, firstPoint + heightUp);
+    WriteOutPosition(2, secondPoint);
+    WriteOutPosition(3, secondPoint + heightUp);
+   
+    float3 UpVector = float3(0.0f, 0.0f, 1.0f); 
+    float3 tangentX = normalize(EndPosition.xyz - StartPosition.xyz);
+    float3 tangentY = normalize(UpVector); // wzi¹æ pod uwagê ¿e jeœli mesh bêdzie obrócony, to tangentY nie bêdzie ju¿ w górê, tylko w kierunku obrotu. ( a to mo¿e byæ case dla generowania w NOR )
+    float3 tangentZ = normalize(cross(tangentY, tangentX));
+    
+    float BinormalSign = dot(cross(tangentZ, tangentX), tangentY) < 0.0f ? -1.0f : 1.0f; // cross(tangentZ, tangentX) wyznacza kierunek tangentY. PóŸniej w zale¿noœci od wyznaczonego kierunku bêdziemy mieæ -1 albo 1. 
+    // PóŸniej przy odtwarzaniu tangentY z FPackedNormal bêdzie wiadomo w któr¹ stronê ma iœæ tangentY
+   
+    uint PackedTangentX = PackFPackedNormal(float3(tangentX), 1.0f);
+    uint PackedTangentZ = PackFPackedNormal(float3(tangentZ), BinormalSign);
+    
+    for(uint i = 0; i < 4; i++)
+    {
+        OutTangents[i] = uint2(PackedTangentX, PackedTangentZ);
+    }
+    
+    OutTextureCoords[0] = float2(0.0f, 0.0f);
+    OutTextureCoords[1] = float2(0.0f, 1.0f);
+    OutTextureCoords[2] = float2(1.0f, 0.0f);
+    OutTextureCoords[3] = float2(1.0f, 1.0f);
+    
+    OutIndices[0] = 0;
+    OutIndices[1] = 1;
+    OutIndices[2] = 2;
+    
+    OutIndices[3] = 2;
+    OutIndices[4] = 1;
+    OutIndices[5] = 3;
+}
+
+
+void GenerateBuildingsWalls(uint3 ThreadId : SV_DispatchThreadID)
+{
+    uint BuildingIndex = ThreadId.x;
+    
+    if (BuildingIndex >= BuildingsCount)
+    {
+        return;
+    }
+        
+    BuildingData Building = InBuildings[BuildingIndex];
+    
+    uint OutVertexStartIndex = Building.PointOffset * 4;  // * 4 bo ka¿da œciana ma sharp edges
+    uint OutIndexStartIndex  = Building.PointOffset * 6;
+    
+    for (uint Index = 0; Index < Building.PointCount; Index++)
+    {
+        uint PointIndex = Index + Building.PointOffset;
+        
+        float3 firstPoint  = InFootprints[PointIndex];
+        float3 secondPoint = InFootprints[(PointIndex + 1) % BuildingsCount]; // modulo bo ostatni punkt ³¹czy siê z pierwszym
+        
+        float3 heightUp = float3(0.0f, 0.0f, WallHeight);
+        
+        WriteOutPosition(OutVertexStartIndex + 0, firstPoint);
+        WriteOutPosition(OutVertexStartIndex + 1, firstPoint + heightUp);
+        WriteOutPosition(OutVertexStartIndex + 2, secondPoint);
+        WriteOutPosition(OutVertexStartIndex + 3, secondPoint + heightUp);
+   
+        float3 UpVector = float3(0.0f, 0.0f, 1.0f);
+        float3 tangentX = normalize(EndPosition.xyz - StartPosition.xyz);
+        float3 tangentY = normalize(UpVector); // wzi¹æ pod uwagê ¿e jeœli mesh bêdzie obrócony, to tangentY nie bêdzie ju¿ w górê, tylko w kierunku obrotu. ( a to mo¿e byæ case dla generowania w NOR )
+        float3 tangentZ = normalize(cross(tangentY, tangentX));
+    
+        float BinormalSign = dot(cross(tangentZ, tangentX), tangentY) < 0.0f ? -1.0f : 1.0f; // cross(tangentZ, tangentX) wyznacza kierunek tangentY. PóŸniej w zale¿noœci od wyznaczonego kierunku bêdziemy mieæ -1 albo 1. 
+        // PóŸniej przy odtwarzaniu tangentY z FPackedNormal bêdzie wiadomo w któr¹ stronê ma iœæ tangentY
+   
+        uint PackedTangentX = PackFPackedNormal(float3(tangentX), 1.0f);
+        uint PackedTangentZ = PackFPackedNormal(float3(tangentZ), BinormalSign);
+    
+        for (uint i = 0; i < 4; i++)
+        {
+            OutTangents[OutVertexStartIndex + i] = uint2(PackedTangentX, PackedTangentZ);
+        }
+    
+        OutTextureCoords[OutVertexStartIndex + 0] = float2(0.0f, 0.0f);
+        OutTextureCoords[OutVertexStartIndex + 1] = float2(0.0f, 1.0f);
+        OutTextureCoords[OutVertexStartIndex + 2] = float2(1.0f, 0.0f);
+        OutTextureCoords[OutVertexStartIndex + 3] = float2(1.0f, 1.0f);
+    
+        OutIndices[OutIndexStartIndex + 0] = 0;
+        OutIndices[OutIndexStartIndex + 1] = 1;
+        OutIndices[OutIndexStartIndex + 2] = 2;
+    
+        OutIndices[OutIndexStartIndex + 3] = 2;
+        OutIndices[OutIndexStartIndex + 4] = 1;
+        OutIndices[OutIndexStartIndex + 5] = 3;
+        
+        OutVertexStartIndex += 4;
+        OutIndexStartIndex  += 6;
+    }
+}
+
+
+
+/*
+UWAGA MEGA WA¯NE !! - bêdzie do u¿ycia na footprintach !
+
+2. Najwa¿niejsze: zrozumieæ wykonywanie równoleg³e
+WyobraŸ sobie, ¿e masz 1000 punktów i chcesz ka¿dy podnieœæ o 100 jednostek.
+
+Zamiast pêtli C++ wykonanej na CPU mo¿esz napisaæ:
+StructuredBuffer<float4> InPositions;
+RWStructuredBuffer<float4> OutPositions;
+uint Count;
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 ThreadId : SV_DispatchThreadID)
+{
+    uint i = ThreadId.x;
+
+    if (i >= Count)
+        return;
+
+    OutPositions[i] =
+        InPositions[i] + float4(0, 0, 100, 0);
+}
+
+
+Tutaj:
+- Ka¿dy w¹tek wykonuje ten sam kod.
+- ThreadId.x okreœla, który element obs³uguje dany w¹tek.
+- numthreads(64,1,1) oznacza 64 w¹tki na grupê.
+- Dla 1000 punktów uruchamiasz 16 grup, czyli 1024 w¹tki. Nadmiarowe koñcz¹ pracê na if
+*/
